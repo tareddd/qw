@@ -154,4 +154,4 @@ process.on("uncaughtExceptionMonitor", (err, origin) => {
     console.log("Uncaught Exception Monitor:", err, origin);
 });
 
-client.login(config.discord.bot_token);
+client.login(process.env.BOT_TOKEN || config.discord.bot_token);
