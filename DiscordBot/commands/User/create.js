@@ -1,27 +1,26 @@
 const { MessageEmbed } = require("discord.js");
-const User = require("../../../model/user.js")
+const User = require("../../../model/user.js");
 const functions = require("../../../structs/functions.js");
+const fs = require("fs");
+const config = JSON.parse(fs.readFileSync("./Config/config.json").toString());
+
+function generatePassword(length = 16) {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%&*";
+    let password = "";
+    for (let i = 0; i < length; i++) {
+        password += chars[Math.floor(Math.random() * chars.length)];
+    }
+    return password;
+}
 
 module.exports = {
     commandInfo: {
         name: "create",
-        description: "Creates an account on Reload Backend.",
+        description: "Crée un compte automatiquement avec un email et mot de passe générés.",
         options: [
             {
-                name: "email",
-                description: "Your email.",
-                required: true,
-                type: 3
-            },
-            {
                 name: "username",
-                description: "Your username.",
-                required: true,
-                type: 3
-            },
-            {
-                name: "password",
-                description: "Your password.",
+                description: "Ton nom d'utilisateur.",
                 required: true,
                 type: 3
             }
@@ -31,79 +30,77 @@ module.exports = {
         await interaction.deferReply({ ephemeral: true });
 
         const { options } = interaction;
-
         const discordId = interaction.user.id;
+        const username = options.get("username").value.trim();
 
-        // Vérification âge du compte Discord (minimum 1 semaine = 7 jours)
+        // Vérification âge du compte Discord (minimum 7 jours)
         const accountCreatedAt = interaction.user.createdAt;
-        const now = new Date();
-        const diffMs = now - accountCreatedAt;
-        const diffDays = diffMs / (1000 * 60 * 60 * 24);
-
+        const diffDays = (Date.now() - accountCreatedAt) / (1000 * 60 * 60 * 24);
         if (diffDays < 7) {
             const daysLeft = Math.ceil(7 - diffDays);
             return interaction.editReply({
-                content: `❌ Your Discord account must be at least **7 days old** to create an account.\nYour account is **${Math.floor(diffDays)} day(s)** old. Please wait **${daysLeft} more day(s)**.`,
+                content: `❌ Ton compte Discord doit avoir au moins **7 jours**.\nTon compte a **${Math.floor(diffDays)} jour(s)**. Attends encore **${daysLeft} jour(s)**.`,
                 ephemeral: true
             });
         }
-        const email = options.get("email").value;
-        const username = options.get("username").value;
-        const password = options.get("password").value;
 
-        const plainEmail = options.get('email').value;
-        const plainUsername = options.get('username').value;
+        // Validations username
+        if (username.length < 3) return interaction.editReply({ content: "❌ Le nom d'utilisateur doit faire au moins 3 caractères.", ephemeral: true });
+        if (username.length > 25) return interaction.editReply({ content: "❌ Le nom d'utilisateur doit faire moins de 25 caractères.", ephemeral: true });
+        if (!/^[a-zA-Z0-9_]+$/.test(username)) return interaction.editReply({ content: "❌ Le nom d'utilisateur ne peut contenir que des lettres, chiffres et underscores.", ephemeral: true });
 
-        const existingEmail = await User.findOne({ email: plainEmail });
-        const existingUser = await User.findOne({ username: plainUsername });
+        // Vérifie si username ou discordId déjà utilisé
+        const existingUser = await User.findOne({ username_lower: username.toLowerCase() });
+        if (existingUser) return interaction.editReply({ content: "❌ Ce nom d'utilisateur est déjà pris.", ephemeral: true });
 
-        const emailFilter = /^([a-zA-Z0-9_\.\-])+\@(([a-zA-Z0-9\-])+\.)+([a-zA-Z0-9]{2,4})+$/;
-        if (!emailFilter.test(email)) {
-            return interaction.editReply({ content: "You did not provide a valid email address!", ephemeral: true });
-        }
-        if (existingEmail) {
-            return interaction.editReply({ content: "Email is already in use, please choose another one.", ephemeral: true });
-        }
-        if (existingUser) {
-            return interaction.editReply({ content: "Username already exists. Please choose a different one.", ephemeral: true });
-        }
-        if (username.length >= 25) {
-            return interaction.editReply({ content: "Your username must be less than 25 characters long.", ephemeral: true });
-        }
-        if (username.length < 3) {
-            return interaction.editReply({ content: "Your username must be at least 3 characters long.", ephemeral: true });
-        }
-        if (password.length >= 128) {
-            return interaction.editReply({ content: "Your password must be less than 128 characters long.", ephemeral: true });
-        }
-        if (password.length < 4) {
-            return interaction.editReply({ content: "Your password must be at least 4 characters long.", ephemeral: true });
+        const existingDiscord = await User.findOne({ discordId });
+        if (existingDiscord) return interaction.editReply({ content: "❌ Tu as déjà un compte lié à ce Discord.", ephemeral: true });
+
+        // Génère email et mot de passe
+        const email = `${username.toLowerCase()}@dev.nexyra`;
+        const password = generatePassword(16);
+
+        // Vérifie si email déjà utilisé
+        const existingEmail = await User.findOne({ email });
+        if (existingEmail) return interaction.editReply({ content: "❌ Cet email est déjà utilisé.", ephemeral: true });
+
+        // Crée le compte
+        const resp = await functions.registerUser(discordId, username, email, password);
+
+        if (resp.status >= 400) {
+            return interaction.editReply({ content: `❌ Erreur lors de la création : ${resp.message || "Erreur inconnue"}`, ephemeral: true });
         }
 
-        await functions.registerUser(discordId, username, email, password).then(resp => {
-            let embed = new MessageEmbed()
-            .setColor(resp.status >= 400 ? "#ff0000" : "#56ff00")
-            .setThumbnail(interaction.user.avatarURL({ format: 'png', dynamic: true, size: 256 }))
-            .addFields({
-                name: "Message",
-                value: "Successfully created an account.",
-            }, {
-                name: "Username",
-                value: username,
-            }, {
-                name: "Discord Tag",
-                value: interaction.user.tag,
-            })
+        // Envoie les infos en MP
+        try {
+            const dmUser = await interaction.client.users.fetch(discordId);
+            await dmUser.send(
+                `✅ **Compte créé avec succès !**\n\n` +
+                `👤 **Username :** \`${username}\`\n` +
+                `📧 **Email :** \`${email}\`\n` +
+                `🔑 **Mot de passe :** \`${password}\`\n\n` +
+                `⚠️ Garde ces informations en sécurité, ne les partage à personne.`
+            );
+        } catch (dmErr) {
+            // DMs fermés — on répond en éphémère
+            return interaction.editReply({
+                content: `✅ Compte créé !\n\n📧 Email : \`${email}\`\n🔑 Mot de passe : \`${password}\`\n\n⚠️ Sauvegarde ces infos, elles ne seront plus affichées.`,
+                ephemeral: true
+            });
+        }
+
+        const embed = new MessageEmbed()
+            .setTitle("✅ Compte créé")
+            .setDescription(`Les informations de connexion ont été envoyées en **message privé**.`)
+            .setColor("#22c55e")
+            .addFields(
+                { name: "Username", value: username, inline: true },
+                { name: "Discord", value: interaction.user.tag, inline: true }
+            )
+            .setThumbnail(interaction.user.avatarURL({ format: "png", dynamic: true, size: 256 }))
             .setTimestamp()
-            .setFooter({
-                text: "Reload Backend",
-                iconURL: "https://i.imgur.com/2RImwlb.png"
-            })
+            .setFooter({ text: "Reload Backend", iconURL: "https://i.imgur.com/2RImwlb.png" });
 
-            if (resp.status >= 400) return interaction.editReply({ embeds: [embed], ephemeral: true });
-
-            (interaction.channel ? interaction.channel : interaction.user).send({ embeds: [embed] });
-            interaction.editReply({ content: "You successfully created an account!", ephemeral: true });
-        });
+        interaction.editReply({ embeds: [embed], ephemeral: true });
     }
-}
+};
