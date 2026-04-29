@@ -120,7 +120,12 @@ setInterval(checkUpdates, 60000);
 
 mongoose.set('strictQuery', true);
 
-mongoose.connect(process.env.MONGODB_URI || config.mongodb.database, () => {
+mongoose.connect(process.env.MONGODB_URI || config.mongodb.database, {
+    serverSelectionTimeoutMS: 30000,
+    socketTimeoutMS: 45000,
+    keepAlive: true,
+    keepAliveInitialDelay: 300000
+}, () => {
     log.backend("App successfully connected to MongoDB!");
 });
 
