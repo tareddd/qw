@@ -71,20 +71,11 @@ app.get("/api/launcher/send-code", async (req, res) => {
         const expires = Date.now() + 5 * 60 * 1000; // 5 minutes
         pendingCodes.set(discordId, { code, expires });
 
-        // Envoie le MP via le bot Discord
-        // Attend jusqu'à 10s que le bot soit prêt
-        let discordClient = global.discordClient;
+        // Envoie le MP via le bot Discord — échec immédiat si bot pas prêt
+        const discordClient = global.discordClient;
         if (!discordClient) {
-            for (let i = 0; i < 10; i++) {
-                await new Promise(r => setTimeout(r, 1000));
-                discordClient = global.discordClient;
-                if (discordClient) break;
-            }
+            return res.status(500).json({ error: "Bot Discord non disponible. Vérifie le token du bot." });
         }
-        if (!discordClient) {
-            return res.status(500).json({ error: "Discord bot not available. Make sure the bot is running." });
-        }
-
         try {
             const discordUser = await discordClient.users.fetch(discordId);
             await discordUser.send(
