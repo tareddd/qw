@@ -53,7 +53,7 @@ const app = express();
 if (!fs.existsSync("./ClientSettings")) fs.mkdirSync("./ClientSettings");
 
 global.JWT_SECRET = functions.MakeID();
-const PORT = config.port;
+const PORT = process.env.PORT || config.port;
 const WEBSITEPORT = config.Website.websiteport;
 
 let httpsServer;
